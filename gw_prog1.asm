@@ -3,7 +3,7 @@ includelib \Irvine\Irvine32.lib
 
 .DATA
 InputMessage		DB	'Please enter a sentence up to 50 characters: ', 0
-MenuMessage1		DB	13, 10, 'Function 1: Enter a letter and get the position of the first occurrance in the string.', 13, 10,
+MenuMessage1		DB	13, 10, 'Function 1: Enter a letter and get the position of the first occurrence in the string.', 13, 10,
 						'Function 2: Enter a letter and get the number of occurrences in the string.', 13, 10,
 						'Function 3: Get the length of the string.', 13, 10,
 						'Function 4: Get the number of alphanumeric characters in the string.', 13, 10, 0
