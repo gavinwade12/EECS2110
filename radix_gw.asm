@@ -15,6 +15,7 @@ includelib \Irvine\Irvine32.lib
 .DATA
 InputRadixMessage	DB	13, 10, 'Please enter the input radix (64 max, use digits, "h" or "H" for hex, or "x" or "X" to exit): ', 0
 OutputRadixmessage	DB	13, 10, 'Please enter the output radix (64 max, use digits, "h" or "H" for hex, or "x" or "X" to exit): ', 0
+RadixError			DB	13, 10, 'Error with radix. Try again.', 0
 InputNumberAMessage	DB	13, 10, 'Please enter the number A (2 byte max): ', 0
 InputNumberBMessage	DB	13, 10, 'Please enter the number B (2 byte max): ', 0
 NumberInputError	DB	13, 10, 'Oops! Something is wrong with your input. Please try again.', 0
@@ -25,7 +26,7 @@ QuotientMessage		DB	13, 10, 'A / B = ', 0
 ExponentMessage		DB	13, 10, 'A ^ B = ', 0
 OverflowError		DB	' Experienced an overflow during this operation. Not printing incorrect results. Skipping...', 0
 RadixPostfix		DB	' Base', ?, ?, 0
-DecimalPostfix		DB	' Decimal', 0
+DecimalPostfix		DB	' Decimal, ', 0
 RemainderPostfix	DB	' remainder ', 0
 ArithmeticFlags		DB	? ; Signifies an overflow for sum, difference, product, and exponential results at bits 0, 1, 2, and 3 respectively
 InputRadix			DB	?
@@ -59,12 +60,18 @@ Main ENDP
 GetParsedRadices PROC NEAR ; dx = -1 signals a program exit
 GetInputRadix:
 xor ax, ax
+mov cl, 10
+mov ch, 0
 lea ebx, InputRadixMessage
 call WriteBytes
+xor bx, bx
+
+NextInputChar:
 call ReadChar
 call WriteChar
-cmp al, 13H
-je UseLastInput
+cmp al, 13
+je EndInputRadix
+inc ch
 cmp al, 'H'
 je UseHexInput
 cmp al, 'h'
@@ -74,43 +81,60 @@ je ExitSignal
 cmp al, 'X'
 je ExitSignal
 
-sub al, '0'
-cmp al, 1
-jle GetInputRadix
+sub al, 30H
+cmp al, 0
+jl InputRadixError
 cmp al, 9
-jg GetInputRadix
-mov LastInputRadix, al
-call ReadChar
-call WriteChar
-cmp al, 13H
-jmp UseLastInput
-sub al, '0'
-jl GetInputRadix
-cmp al, 9
-jg GetInputRadix
-xchg LastInputRadix, al
-mov ah, 10
-mul ah
-add LastInputRadix, al
-jmp UseLastInput
+jg InputRadixError
+xchg bl, al
+imul cl
+add bl, al
+cmp bl, 64
+jg InputRadixError
+jmp NextInputChar
+
+InputRadixError:
+lea ebx, RadixError
+call WriteBytes
+jmp GetInputRadix
 
 UseHexInput:
-mov LastInputRadix, 16
+mov ah, 16
+jmp UseNewInputRadix
+
+EndInputRadix:
+cmp ch, 0
+jg UseNewInputRadix
 
 UseLastInput:
 cmp LastInputRadix, 0
-je GetInputRadix
-mov dh, LastInputRadix
-mov InputRadix, dh
+je InputRadixError
+mov ah, LastInputRadix
+mov InputRadix, ah
+jmp GetOutputRadix
+
+UseNewInputRadix:
+cmp bl, 2
+jl InputRadixError
+cmp bl, 64
+jg InputRadixError
+mov InputRadix, bl
+mov LastInputRadix, bl
 
 GetOutputRadix:
 xor ax, ax
+mov cl, 10
+mov ch, 0
 lea ebx, OutputRadixMessage
 call WriteBytes
+xor bx, bx
+
+NextOutputChar:
 call ReadChar
 call WriteChar
-cmp al, 13H
-je UseLastOutput
+cmp al, 13
+je EndOutputRadix
+inc ch
 cmp al, 'H'
 je UseHexOutput
 cmp al, 'h'
@@ -120,44 +144,59 @@ je ExitSignal
 cmp al, 'X'
 je ExitSignal
 
-sub al, '0'
-cmp al, 1
-jle GetOutputRadix
+sub al, 30H
+cmp al, 0
+jl OutputRadixError
 cmp al, 9
-jg GetOutputRadix
-mov LastOutputRadix, al
-call ReadChar
-call WriteChar
-cmp al, 13H
-jmp UseLastOutput
-sub al, '0'
-jl GetOutputRadix
-cmp al, 9
-jg GetOutputRadix
-xchg LastOutputRadix, al
-mov ah, 10
-mul ah
-add LastOutputRadix, al
-jmp UseLastOutput
+jg OutputRadixError
+xchg bl, al
+imul cl
+add bl, al
+cmp bl, 64
+jg OutputRadixError
+jmp NextOutputChar
+
+OutputRadixError:
+lea ebx, RadixError
+call WriteBytes
+jmp GetOutputRadix
 
 UseHexOutput:
-mov LastOutputRadix, 16
+mov ah, 16
+jmp UseNewOutputRadix
+
+EndOutputRadix:
+cmp ch, 0
+jg UseNewOutputRadix
 
 UseLastOutput:
 cmp LastOutputRadix, 0
-je GetOutputRadix
-mov dl, LastOutputRadix
-mov OutputRadix, dl
-xor ah, ah ; Set the RadixPostfix
-mov al, dl
-mov dl, 10
-div dl
-add al, 30H
-add ah, 30H
+je OutputRadixError
+mov ah, LastOutputRadix
+mov OutputRadix, ah
+jmp SetRadixPostfix
+
+UseNewOutputRadix:
+cmp bl, 2
+jl OutputRadixError
+cmp bl, 64
+jg OutputRadixError
+mov OutputRadix, bl
+mov LastOutputRadix, bl
+
+SetRadixPostfix:
+xor ax, ax
+mov al, bl
+mov bl, 10
 mov ebx, offset RadixPostfix + 4
-mov [ebx], al
-inc bx
+RadixPostfixLoop:
+idiv dl
+add ah, 30H
 mov [ebx], ah
+inc bx
+xor ah, ah
+cmp al, 0
+jg SetRadixPostfix
 RET
 
 ExitSignal:
@@ -177,7 +216,7 @@ mov cl, InputRadix
 GetNextAInput:
 call ReadChar
 call WriteChar
-cmp al, 13H
+cmp al, 13
 je PrepareForNumberB
 cmp al, '0'
 jl GetNumberABaseParser
@@ -200,11 +239,11 @@ cmp ax, -1
 je NumberAInputError
 
 HandleNumberAInput:
-cmp al, dl
+cmp al, cl
 jg NumberAInputError
 xor ah, ah
 xchg ax, bx
-mul cx
+imul cx
 cmp dx, 0
 jg NumberAInputError
 add bx, ax
@@ -229,10 +268,10 @@ mov cl, InputRadix
 GetNextBInput:
 call ReadChar
 call WriteChar
-cmp al, 13H
+cmp al, 13
 je Done
 cmp al, '0'
-jl GetNumberBBaseParser
+jl NumberBInputError
 cmp al, '9'
 jg GetNumberBBaseParser
 sub al, 30H
@@ -252,11 +291,11 @@ cmp ax, -1
 je NumberBInputError
 
 HandleNumberBInput:
-cmp al, dl
+cmp al, cl
 jg NumberBInputError
 xor ah, ah
 xchg ax, bx
-mul cx
+imul cx
 cmp dx, 0
 jg NumberBInputError
 add bx, ax
@@ -303,7 +342,7 @@ jl InvalidInputError
 cmp al, 'Z'
 jg CheckLowerCase
 sub al, 31H
-jmp Done
+RET
 
 CheckLowerCase:
 cmp al, 'a'
@@ -311,11 +350,11 @@ jl InvalidInputError
 cmp al, 'z'
 jg InvalidInputError
 sub al, 6H
-jmp Done
+RET
 
 Character64:
 mov al, 64
-jmp Done
+RET
 
 Character63:
 mov al, 63
@@ -329,7 +368,7 @@ ParseRadix33To64 ENDP
 Arithmetic PROC NEAR
 mov bx, NumberA
 mov cx, NumberB
-mov bx, ax
+mov ax, bx
 add ax, cx
 jo SumOverflow
 mov Sum, ax
@@ -342,7 +381,7 @@ mov Difference, ax
 
 GetProduct:
 mov ax, bx
-mul cx
+imul cx
 jo ProductOverflow
 cmp dx, 0
 jg ProductOverflow
@@ -351,7 +390,7 @@ mov Product, ax
 GetQuotient:
 xor dx, dx
 mov ax, bx
-div cx
+idiv cx
 mov Quotient, ax
 mov Remainder, dx
 
@@ -367,7 +406,7 @@ dec cx
 
 Exponent:
 jcxz SetExponentialResult
-mul bx
+imul bx
 cmp dx, 0
 jg ExponentialOverflow
 dec cx
@@ -400,32 +439,169 @@ Arithmetic ENDP
 OutputResults PROC NEAR
 lea ebx, SumMessage
 call WriteBytes
-mov dx, ArithmeticFlags
-mov bx, dx
-and bx, 00000001B
-cmp bx, 00000001B
+mov bl, ArithmeticFlags
+and bl, 00000001B
+cmp bl, 00000001B
 je SumOverflow
+lea ebx, Sum
+mov edx, ebx
+call OutputDecimal
+mov ebx, edx
+call OutputUserRadix
+
+PrintDifference:
+lea ebx, DifferenceMessage
+call WriteBytes
+mov bl, ArithmeticFlags
+and bl, 00000010B
+cmp bl, 00000010B
+je DifferenceOverflow
+lea ebx, Difference
+call OutputDecimal
+call OutputUserRadix
+
+PrintProduct:
+lea ebx, ProductMessage
+call WriteBytes
+mov bl, ArithmeticFlags
+and bl, 00000100B
+cmp bl, 00000100B
+je ProductOverflow
+lea ebx, Product
+call OutputDecimal
+call OutputUserRadix
+
+PrintQuotient:
+lea ebx, QuotientMessage
+call WriteBytes
+lea ebx, Quotient
+call OutputDecimal
+call OutputUserRadix
+
+lea ebx, ExponentMessage
+call WriteBytes
+mov bl, ArithmeticFlags
+and bl, 00001000B
+cmp bl, 00001000B
+je ExponentialOverflow
+lea ebx, ExponentialResult
+call OutputDecimal
+call OutputUserRadix
+RET
 
 SumOverflow:
-lea ebx, OverflowMessage
+lea ebx, OverflowError
 call WriteBytes
 jmp PrintDifference
 
 DifferenceOverflow:
-lea ebx, OverflowMessage
+lea ebx, OverflowError
 call WriteBytes
 jmp PrintProduct
 
 ProductOverflow:
-lea ebx, OverflowMessage
+lea ebx, OverflowError
 call WriteBytes
 jmp PrintQuotient
 
 ExponentialOverflow:
-lea ebx, OverflowMessage
+lea ebx, OverflowError
 call WriteBytes
 RET
 OutputResults ENDP
+
+OutputDecimal PROC NEAR ; Params: ebx - location of word size value to output
+mov ax, [ebx]
+xor cx, cx
+xor dx, dx
+mov cl, 10
+cmp ax, 0
+jge OutputNextChar
+push '-'
+inc ch
+neg ax
+
+OutputNextChar:
+idiv cl
+add ah, 30H
+mov dl, ah
+push dx
+xor ah, ah
+inc ch
+cmp al, 0
+jg OutputNextChar
+
+Write:
+pop ax
+call WriteChar
+dec ch
+cmp ch, 0
+jg Write
+lea ebx, DecimalPostfix
+call WriteBytes
+RET
+OutputDecimal ENDP
+
+OutputUserRadix PROC NEAR ; Params: ebx - location of word size value to output
+mov ax, [ebx]
+xor cx, cx
+xor dx, dx
+mov cl, OutputRadix
+cmp ax, 0
+jge OutputNextChar
+push '-'
+inc ch
+neg ax
+
+OutputNextChar:
+idiv cl
+cmp ah, 9
+jle Digit
+cmp ah, 36
+jle Uppercase
+cmp ah, 62
+jle Lowercase
+cmp ah, 63
+je PlusSign
+push '/'
+LoopBookKeeping:
+inc ch
+xor ah, ah
+cmp al, 0
+jg OutputNextChar
+
+Write:
+pop ax
+call WriteChar
+dec ch
+cmp ch, 0
+jg Write
+lea ebx, RadixPostfix
+call WriteBytes
+RET
+
+Digit:
+add ah, 30H
+mov dl, ah
+push dx
+jmp LoopBookKeeping
+
+Uppercase:
+add ah, 31H
+mov dl, ah
+push dx
+jmp LoopBookKeeping
+
+Lowercase:
+add ah, 6H
+mov dl, ah
+push dx
+jmp LoopBookKeeping
+
+PlusSign:
+push '+'
+jmp LoopBookKeeping
+OutputUserRadix ENDP
 
 WriteBytes PROC NEAR ; Params: ebx - location of first byte. stops outputting at null byte
 OutputLoop:
