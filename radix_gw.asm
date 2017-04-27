@@ -1,9 +1,9 @@
 ; Gavin Wade - Radix Project
 ; This project uses the Irvine32 library; however, as noted in the
 ; instructions, it only uses the ReadChar and WriteChar procedures.
-; The maximum radix this program accepts is 64, and the maximum size
+; The maximum radix this program accepts is 64. The maximum size
 ; for Numbers A and B and the results produced from the arithmetic 
-; performed on them is two bytes. It uses the same characters as other 
+; performed on them is a 16bit signed integer. It uses the same characters as other 
 ; common base64 encoders/decoders. The uppercase letters precede lowercase 
 ; letters as the base increases, with the 63rd and 64th characters being 
 ; '+' and '/' respectively. When using any radix below 33, uppercase letters
@@ -25,10 +25,14 @@ ProductMessage		DB	13, 10, 'A * B = ', 0
 QuotientMessage		DB	13, 10, 'A / B = ', 0
 ExponentMessage		DB	13, 10, 'A ^ B = ', 0
 OverflowError		DB	' Experienced an overflow during this operation. Not printing incorrect results. Skipping...', 0
-RadixPostfix		DB	' Base', ?, ?, 0
-DecimalPostfix		DB	' Decimal, ', 0
-RemainderPostfix	DB	' remainder ', 0
-ArithmeticFlags		DB	? ; Signifies an overflow for sum, difference, product, and exponential results at bits 0, 1, 2, and 3 respectively
+DivideByZeroError	DB	' Cannot divide by zero! Skipping...', 0
+RadixPostfix		DB	' Base', ?, ?, ' ', 0
+BinaryPostfix		DB	' Binary ', 0
+DecimalPostfix		DB	' Decimal ', 0
+RemainderPostfix	DB	'remainder ', 0
+ResultSeparator		DB	', ', 0
+ArithmeticFlags		DB	0 ; Signifies an overflow for sum, difference, product, divide by zero, and exponential results at bits 0, 1, 2, 3, and 4 respectively
+NegativeInputFlag	DB	0 ; All bits on if input is negative
 InputRadix			DB	?
 OutputRadix			DB	?
 LastInputRadix		DB	?
@@ -99,7 +103,7 @@ call WriteBytes
 jmp GetInputRadix
 
 UseHexInput:
-mov ah, 16
+mov bl, 16
 jmp UseNewInputRadix
 
 EndInputRadix:
@@ -109,8 +113,8 @@ jg UseNewInputRadix
 UseLastInput:
 cmp LastInputRadix, 0
 je InputRadixError
-mov ah, LastInputRadix
-mov InputRadix, ah
+mov bl, LastInputRadix
+mov InputRadix, bl
 jmp GetOutputRadix
 
 UseNewInputRadix:
@@ -162,7 +166,7 @@ call WriteBytes
 jmp GetOutputRadix
 
 UseHexOutput:
-mov ah, 16
+mov bl, 16
 jmp UseNewOutputRadix
 
 EndOutputRadix:
@@ -172,8 +176,8 @@ jg UseNewOutputRadix
 UseLastOutput:
 cmp LastOutputRadix, 0
 je OutputRadixError
-mov ah, LastOutputRadix
-mov OutputRadix, ah
+mov bl, LastOutputRadix
+mov OutputRadix, bl
 jmp SetRadixPostfix
 
 UseNewOutputRadix:
@@ -187,16 +191,17 @@ mov LastOutputRadix, bl
 SetRadixPostfix:
 xor ax, ax
 mov al, bl
-mov bl, 10
-mov ebx, offset RadixPostfix + 4
+mov dl, 10
+mov ebx, offset RadixPostfix + 6
 RadixPostfixLoop:
 idiv dl
 add ah, 30H
 mov [ebx], ah
-inc bx
+dec ebx
 xor ah, ah
-cmp al, 0
-jg SetRadixPostfix
+idiv dl
+add ah, 30H
+mov [ebx], ah
 RET
 
 ExitSignal:
@@ -212,10 +217,19 @@ call WriteBytes
 xor ax, ax
 xor bx, bx
 xor cx, cx
+mov NegativeInputFlag, 0
 mov cl, InputRadix
+
+call ReadChar
+call WriteChar
+cmp al, '-'
+jne NumberACases
+mov NegativeInputFlag, 11111111B
+
 GetNextAInput:
 call ReadChar
 call WriteChar
+NumberACases:
 cmp al, 13
 je PrepareForNumberB
 cmp al, '0'
@@ -240,7 +254,7 @@ je NumberAInputError
 
 HandleNumberAInput:
 cmp al, cl
-jg NumberAInputError
+jge NumberAInputError
 xor ah, ah
 xchg ax, bx
 imul cx
@@ -255,6 +269,11 @@ call WriteBytes
 jmp GetNumberA
 
 PrepareForNumberB:
+cmp NegativeInputFlag, 11111111B
+jne SetNumberA
+neg bx
+
+SetNumberA:
 mov NumberA, bx
 
 GetNumberB:
@@ -263,11 +282,20 @@ call WriteBytes
 
 xor ax, ax
 xor bx, bx
+mov NegativeInputFlag, 0
 xor cx, cx
 mov cl, InputRadix
+
+call ReadChar
+call WriteChar
+cmp al, '-'
+jne NumberBCases
+mov NegativeInputFlag, 11111111B
+
 GetNextBInput:
 call ReadChar
 call WriteChar
+NumberBCases:
 cmp al, 13
 je Done
 cmp al, '0'
@@ -307,6 +335,11 @@ call WriteBytes
 jmp GetNumberB
 
 Done:
+cmp NegativeInputFlag, 11111111B
+jne SetNumberB
+neg bx
+
+SetNumberB:
 mov NumberB, bx
 RET
 GetNumbers ENDP
@@ -316,7 +349,7 @@ cmp al, 'A'
 jl InvalidInputError
 cmp al, 'Z'
 jg CheckLowerCase
-sub al, 31H
+sub al, 37H
 RET
 
 CheckLowerCase:
@@ -324,7 +357,7 @@ cmp al, 'a'
 jl InvalidInputError
 cmp al, 'z'
 jg InvalidInputError
-sub al, 51H
+sub al, 3DH
 RET
 
 InvalidInputError:
@@ -341,7 +374,7 @@ cmp al, 'A'
 jl InvalidInputError
 cmp al, 'Z'
 jg CheckLowerCase
-sub al, 31H
+sub al, 37H
 RET
 
 CheckLowerCase:
@@ -349,7 +382,7 @@ cmp al, 'a'
 jl InvalidInputError
 cmp al, 'z'
 jg InvalidInputError
-sub al, 6H
+sub al, 57H
 RET
 
 Character64:
@@ -390,10 +423,17 @@ mov Product, ax
 GetQuotient:
 xor dx, dx
 mov ax, bx
+cmp cx, 0
+je DivideByZero
+cmp ax, 0
+jge Divide
+mov dx, 0FFFFH
+Divide:
 idiv cx
 mov Quotient, ax
 mov Remainder, dx
 
+GetExponent:
 cmp cx, 0
 je ZeroExponent
 cmp cx, 0
@@ -420,19 +460,23 @@ mov ExponentialResult, ax
 RET
 
 SumOverflow:
-add ArithmeticFlags, 00000001B
+or ArithmeticFlags, 00000001B
 jmp GetDifference
 
 DifferenceOverflow:
-add ArithmeticFlags, 00000010B
+or ArithmeticFlags, 00000010B
 jmp GetProduct
 
 ProductOverflow:
-add ArithmeticFlags, 00000100B
+or ArithmeticFlags, 00000100B
 jmp GetQuotient
 
+DivideByZero:
+or ArithmeticFlags, 00001000B
+jmp GetExponent
+
 ExponentialOverflow:
-add ArithmeticFlags, 00001000B
+or ArithmeticFlags, 00010000B
 RET
 Arithmetic ENDP
 
@@ -444,9 +488,10 @@ and bl, 00000001B
 cmp bl, 00000001B
 je SumOverflow
 lea ebx, Sum
-mov edx, ebx
 call OutputDecimal
-mov ebx, edx
+lea ebx, ResultSeparator
+call WriteBytes
+lea ebx, Sum
 call OutputUserRadix
 
 PrintDifference:
@@ -458,6 +503,9 @@ cmp bl, 00000010B
 je DifferenceOverflow
 lea ebx, Difference
 call OutputDecimal
+lea ebx, ResultSeparator
+call WriteBytes
+lea ebx, Difference
 call OutputUserRadix
 
 PrintProduct:
@@ -469,23 +517,45 @@ cmp bl, 00000100B
 je ProductOverflow
 lea ebx, Product
 call OutputDecimal
+lea ebx, ResultSeparator
+call WriteBytes
+lea ebx, Product
 call OutputUserRadix
 
 PrintQuotient:
 lea ebx, QuotientMessage
 call WriteBytes
-lea ebx, Quotient
-call OutputDecimal
-call OutputUserRadix
-
-lea ebx, ExponentMessage
-call WriteBytes
 mov bl, ArithmeticFlags
 and bl, 00001000B
 cmp bl, 00001000B
+je DivideByZero
+lea ebx, Quotient
+call OutputDecimal
+lea ebx, RemainderPostfix
+call WriteBytes
+lea ebx, Remainder
+call OutputDecimal
+lea ebx, ResultSeparator
+call WriteBytes
+lea ebx, Quotient
+call OutputUserRadix
+lea ebx, RemainderPostfix
+call WriteBytes
+lea ebx, Remainder
+call OutputUserRadix
+
+PrintExponentialResult:
+lea ebx, ExponentMessage
+call WriteBytes
+mov bl, ArithmeticFlags
+and bl, 00010000B
+cmp bl, 00010000B
 je ExponentialOverflow
 lea ebx, ExponentialResult
 call OutputDecimal
+lea ebx, ResultSeparator
+call WriteBytes
+lea ebx, ExponentialResult
 call OutputUserRadix
 RET
 
@@ -504,6 +574,11 @@ lea ebx, OverflowError
 call WriteBytes
 jmp PrintQuotient
 
+DivideByZero:
+lea ebx, DivideByZeroError
+call WriteBytes
+jmp PrintExponentialResult
+
 ExponentialOverflow:
 lea ebx, OverflowError
 call WriteBytes
@@ -512,30 +587,31 @@ OutputResults ENDP
 
 OutputDecimal PROC NEAR ; Params: ebx - location of word size value to output
 mov ax, [ebx]
-xor cx, cx
 xor dx, dx
-mov cl, 10
+xor cx, cx
+mov bx, 10
 cmp ax, 0
 jge OutputNextChar
-push '-'
-inc ch
+push ax
+mov ax, '-'
+call WriteChar
+pop ax
 neg ax
 
 OutputNextChar:
-idiv cl
-add ah, 30H
-mov dl, ah
+idiv bx
+add dx, 30H
 push dx
-xor ah, ah
-inc ch
-cmp al, 0
+xor dx, dx
+inc cx
+cmp ax, 0
 jg OutputNextChar
 
 Write:
 pop ax
 call WriteChar
-dec ch
-cmp ch, 0
+dec cx
+cmp cx, 0
 jg Write
 lea ebx, DecimalPostfix
 call WriteBytes
@@ -544,63 +620,105 @@ OutputDecimal ENDP
 
 OutputUserRadix PROC NEAR ; Params: ebx - location of word size value to output
 mov ax, [ebx]
+push ax
 xor cx, cx
 xor dx, dx
-mov cl, OutputRadix
+xor bx, bx
+mov bl, OutputRadix
 cmp ax, 0
 jge OutputNextChar
-push '-'
-inc ch
+cmp bl, 2
+je OutputSignedBinary
+cmp bl, 16
+je OutputSignedBinary
+push ax
+mov ax, '-'
+call WriteChar
+pop ax
 neg ax
 
 OutputNextChar:
-idiv cl
-cmp ah, 9
+idiv bx
+cmp dx, 9
 jle Digit
-cmp ah, 36
+cmp dx, 36
 jle Uppercase
-cmp ah, 62
+cmp dx, 62
 jle Lowercase
-cmp ah, 63
+cmp dx, 63
 je PlusSign
 push '/'
 LoopBookKeeping:
-inc ch
-xor ah, ah
-cmp al, 0
+inc cx
+xor dx, dx
+cmp ax, 0
 jg OutputNextChar
 
 Write:
 pop ax
 call WriteChar
-dec ch
-cmp ch, 0
+dec cx
+cmp cx, 0
 jg Write
+pop bx
+cmp bl, 0
+jl BinaryPostfixDecision
+OutputRadixPostfix:
 lea ebx, RadixPostfix
 call WriteBytes
 RET
 
+BinaryPostfixDecision:
+mov bl, OutputRadix
+cmp bl, 2
+je OutputBinaryPostfix
+cmp bl, 16
+je OutputBinaryPostfix
+jmp OutputRadixPostfix
+OutputBinaryPostfix:
+lea ebx, BinaryPostfix
+call WriteBytes
+RET
+
 Digit:
-add ah, 30H
-mov dl, ah
+add dx, 30H
 push dx
 jmp LoopBookKeeping
 
 Uppercase:
-add ah, 31H
-mov dl, ah
+add dx, 36H
 push dx
 jmp LoopBookKeeping
 
 Lowercase:
-add ah, 6H
-mov dl, ah
+add dx, 3CH
 push dx
 jmp LoopBookKeeping
 
 PlusSign:
 push '+'
 jmp LoopBookKeeping
+
+OutputSignedBinary:
+mov dx, 00000001B
+OutputBinaryLoop:
+mov bx, dx
+and bx, ax
+cmp dx, bx
+jne ZeroCase
+mov bx, 31H
+push bx
+jmp BinaryLoopBookKeeping
+ZeroCase:
+mov bx, 30H
+push bx
+BinaryLoopBookKeeping:
+shl dx, 1
+inc cx
+cmp dx, 0
+je Write
+jmp OutputBinaryLoop
+
 OutputUserRadix ENDP
 
 WriteBytes PROC NEAR ; Params: ebx - location of first byte. stops outputting at null byte
