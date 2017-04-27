@@ -7,7 +7,10 @@
 ; common base64 encoders/decoders. The uppercase letters precede lowercase 
 ; letters as the base increases, with the 63rd and 64th characters being 
 ; '+' and '/' respectively. When using any radix below 33, uppercase letters
-; and their respective lowercase counterparts have the same value.
+; and their respective lowercase counterparts have the same value. When the output radix
+; is set to binary or hex, negative results will be output with 2's compliment
+; signed binary. All other radices will have negative numbers output as normal,
+; but will have a '-' preceding them.
 
 include \Irvine\Irvine32.inc
 includelib \Irvine\Irvine32.lib
@@ -686,7 +689,7 @@ push dx
 jmp LoopBookKeeping
 
 Uppercase:
-add dx, 36H
+add dx, 37H
 push dx
 jmp LoopBookKeeping
 
